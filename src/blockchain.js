@@ -75,7 +75,8 @@ class Blockchain {
            }
            block.hash = SHA256(JSON.stringify(block)).toString();
 
-           if (this.validateChain) {
+           let chainVal = await this.validateChain();
+           if (chainVal && chainVal.length < 1) {
                self.chain.push(block)
                self.height++;
            } else {
@@ -101,7 +102,6 @@ class Blockchain {
      */
     requestMessageOwnershipVerification(address) {
         return new Promise((resolve) => {
-            console.log("ciao");
             resolve(address + ':' + new Date().getTime().toString().slice(0,-3) + ':starRegistry');
         });
     }
@@ -126,10 +126,11 @@ class Blockchain {
     submitStar(address, message, signature, star) {
         let self = this;
         return new Promise(async (resolve, reject) => {
+
             let msgTime = parseInt(message.split(':')[1]);
             let currentTime = parseInt(new Date().getTime().toString().slice(0,-3));
             
-            if (msgTime > (currentTime - 300000 )) {
+            if (currentTime - msgTime < 5 * 60 * 1000 ) {
                 const isValid = bitcoinMessage.verify(message, address, signature);
                 if (isValid) {
                     let validBlock = new BlockClass.Block({
@@ -142,7 +143,6 @@ class Blockchain {
                 }
 
             } else {
-                console.log("cioao");
                 reject(Error("Timing Error"));
             }
         });
@@ -223,28 +223,36 @@ class Blockchain {
         let self = this;
         let errorLog = [];
         return new Promise(async (resolve, reject) => {
-            if (self.height > 0) {
-                let counter = 1
-                let previousBlockHash = self.chain[counter - 1].hash;
-                self.chain.forEach(block => {
-                    let valid = block.validation();
+            let promisesList = [];
+            let counter = 0;
+            self.chain.forEach(block => {
+                promisesList.push(block.validate());
+                if (block.height > 0) {
+                    let previousBlockHash = block.previousBlockHash;
+                    let blockHash = self.chain[counter - 1].hash;
+                    if (blockHash != previousBlockHash) {
+                        errorLog.push(`Block validation error at block height ${counter+1}`);
+                    }
+                }
+                counter++;
+            });
+            Promise.all(promisesList).then((results) => {
+                counter = 0;
+                results.forEach(valid => {
                     if (!valid) {
-                        errorLog.push(`Block validation error at block height ${counter}`);
-                    } else if (block.hash != previousBlockHash) {
-                        errorLog.push(`Block hash mismatch with previous block at height ${counter}`);
+                        errorLog.push(`Block hash mismatch with previous block at height ${self.chain[counter].height}`);
                     }
                     counter++;
-                })
-                if (errorLog) {
-                    resolve(errorLog);
-                } else {
-                    resolve(true);
-                }
-            } else {
-                reject(false);
-            }
+                });
+                resolve(errorLog);
+            }).catch((err) => reject(err));
         });
     }
+
+
+    
+
+    
 
 }
 
